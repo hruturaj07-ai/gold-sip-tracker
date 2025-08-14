@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Best Gold SIP Date Finder</title>
+<style>
+    body { font-family: Arial, sans-serif; background: #fdf6e3; margin: 0; padding: 0; }
+    header { background: gold; padding: 15px; text-align: center; font-size: 1.4em; font-weight: bold; }
+    main { padding: 15px; }
+    label { display: block; margin-bottom: 5px; font-weight: bold; }
+    input, button { width: 100%; padding: 12px; margin-bottom: 15px; font-size: 1.1em; border: 1px solid #ccc; border-radius: 5px; }
+    button { background: gold; border: none; font-weight: bold; cursor: pointer; }
+    button:hover { background: #e6b800; }
+    #result { font-size: 1.2em; margin-bottom: 15px; font-weight: bold; }
+    table { width: 100%; border-collapse: collapse; font-size: 1em; }
+    th, td { border: 1px solid #ccc; padding: 10px; text-align: center; }
+    th { background: #fff3b0; }
+    tr.best { background: #c6f6d5; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<header>📊 Best Gold SIP Date Finder</header>
+<main>
+    <label for="sipAmount">Monthly SIP Amount (₹):</label>
+    <input type="number" id="sipAmount" value="25000">
+    <button onclick="findBestDate()">Find Best Date (25th → 10th)</button>
+
+    <p id="result"></p>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Price (₹/g)</th>
+                <th>Grams Bought</th>
+                <th>Extra Cost vs Best (₹)</th>
+            </tr>
+        </thead>
+        <tbody id="rateTable">
+            <tr><td colspan="4">No data yet</td></tr>
+        </tbody>
+    </table>
+</main>
+
+<script>
+async function findBestDate() {
+    const sipAmount = parseFloat(document.getElementById("sipAmount").value);
+    const today = new Date();
+    let month = today.getMonth();
+    let year = today.getFullYear();
+
+    const startDate = new Date(year, month - 1, 25);
+    const endDate = new Date(year, month, 10);
+
+    const symbol = "GOLDINR=X";
+    const period1 = Math.floor(startDate.getTime() / 1000);
+    const period2 = Math.floor(endDate.getTime() / 1000);
+    const yahooUrl = `https://query1.finance.yahoo.com/v7/finance/download/${symbol}?period1=${period1}&period2=${period2}&interval=1d&events=history&includeAdjustedClose=true`;
+
+    // ✅ Working proxy for GitHub Pages
+    const proxyUrl = "https://api.allorigins.win/raw?url=" + encodeURIComponent(yahooUrl);
+
+    try {
+        const res = await fetch(proxyUrl);
+        const csv = await res.text();
+        const rows = csv.trim().split("\n").slice(1);
+
+        let tableBody = document.getElementById("rateTable");
+        tableBody.innerHTML = "";
+        let bestDate = null, bestRate = Infinity;
+        let worstRate = 0;
+        let dataArr = [];
+
+        rows.forEach(row => {
+            const [date, open, high, low, close] = row.split(",");
+            const ratePerGram = parseFloat(close) / 10;
+            dataArr.push({ date, rate: ratePerGram });
+            if (ratePerGram < bestRate) bestRate = ratePerGram, bestDate = date;
+            if (ratePerGram > worstRate) worstRate = ratePerGram;
+        });
+
+        dataArr.forEach(entry => {
+            const grams = (sipAmount / entry.rate).toFixed(2);
+            const extraCost = ((entry.rate - bestRate) * grams).toFixed(2);
+            tableBody.innerHTML += `<tr ${entry.date === bestDate ? 'class="best"' : ''}>
+                <td>${entry.date}</td>
+                <td>₹${entry.rate.toFixed(2)}</td>
+                <td>${grams}</td>
+                <td>${extraCost > 0 ? '₹' + extraCost : '—'}</td>
+            </tr>`;
+        });
+
+        if (bestDate) {
+            const savingsPercent = (((worstRate - bestRate) / worstRate) * 100).toFixed(2);
+            document.getElementById("result").innerHTML =
+                `📅 Best Date: <b>${bestDate}</b> at ₹${bestRate.toFixed(2)}/g — 💰 Save up to ${savingsPercent}%`;
+        } else {
+            document.getElementById("result").innerHTML = "⚠ No price data found.";
+        }
+
+    } catch (err) {
+        console.error(err);
+        document.getElementById("result").innerHTML = "⚠ Error fetching gold price data.";
+    }
+}
+</script>
+
+</body>
+</html>
