@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gold SIP Date Finder + Prediction</title>
+<style>
+    body { font-family: Arial, sans-serif; background: #fff8e1; margin: 0; padding: 0; }
+    header { background: gold; color: black; padding: 10px; font-size: 20px; font-weight: bold; text-align: center; }
+    input, button { padding: 10px; font-size: 16px; margin: 5px 0; width: 90%; max-width: 400px; }
+    button { background: orange; border: none; color: white; font-weight: bold; cursor: pointer; }
+    table { border-collapse: collapse; width: 95%; margin: 10px auto; }
+    th, td { border: 1px solid #ccc; padding: 8px; text-align: center; }
+    th { background: #ffeb3b; }
+    h3 { margin-top: 20px; }
+</style>
+</head>
+<body>
+
+<header>📊 Gold SIP Date Finder + Prediction</header>
+<center>
+    <label>Monthly SIP Amount (₹):</label><br>
+    <input type="number" id="sipAmount" value="25000"><br>
+    <button onclick="findBestDate()">Find Best Date (25th → 10th)</button>
+</center>
+
+<h3 style="text-align:center">Best Date Results</h3>
+<table>
+    <thead>
+        <tr>
+            <th>Date</th>
+            <th>Price (₹/g)</th>
+            <th>Grams Bought</th>
+            <th>Extra Cost vs Best (₹)</th>
+        </tr>
+    </thead>
+    <tbody id="rateTable">
+        <tr><td colspan="4">No data yet</td></tr>
+    </tbody>
+</table>
+
+<center>
+    <h3>📈 5-Day Future Prediction</h3>
+</center>
+<table>
+    <thead>
+        <tr>
+            <th>Date</th>
+            <th>Predicted Price (₹/g)</th>
+        </tr>
+    </thead>
+    <tbody id="predictionTable">
+        <tr><td colspan="2">No predictions yet</td></tr>
+    </tbody>
+</table>
+
+<div id="accuracySection" style="display:none;">
+    <center>
+        <h3>✅ Prediction Accuracy</h3>
+    </center>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Predicted (₹/g)</th>
+                <th>Actual (₹/g)</th>
+                <th>Error %</th>
+            </tr>
+        </thead>
+        <tbody id="accuracyTable"></tbody>
+    </table>
+</div>
+
+<script>
+const API_KEY = "YOUR_API_KEY"; // 0DEMSZI1YIYU7772DEPR67572DEPR
+
+function usdOzToInrGram(usdPerOz, inrRate) {
+    const gramsPerOunce = 31.1035;
+    return (usdPerOz * inrRate / gramsPerOunce);
+}
+
+async function findBestDate() {
+    const sipAmount = parseFloat(document.getElementById("sipAmount").value);
+    const today = new Date();
+    let startDate = new Date(today.getFullYear(), today.getMonth() - 1, 25);
+    let endDate = new Date(today.getFullYear(), today.getMonth(), 10);
+
+    let dateStr1 = startDate.toISOString().split("T")[0];
+    let dateStr2 = endDate.toISOString().split("T")[0];
+
+    let url = `https://api.metals.dev/v1/timeseries?api_key=${API_KEY}&start_date=${dateStr1}&end_date=${dateStr2}&currency=USD&unit=t.oz&metals=gold&currencies=INR`;
+
+    try {
+        let res = await fetch(url);
+        let data = await res.json();
+        if (!data.rates) { alert("Error fetching data"); return; }
+
+        let bestRate = Infinity;
+        let rows = [];
+        for (let date in data.rates) {
+            let usdPrice = data.rates[date].metals.gold;
+            let inrRate = data.rates[date].currencies.INR;
+            let inrPerGram = usdOzToInrGram(usdPrice, inrRate);
+            rows.push({ date, inrPerGram, grams: sipAmount / inrPerGram });
+            if (inrPerGram < bestRate) bestRate = inrPerGram;
+        }
+
+        let tableBody = document.getElementById("rateTable");
+        tableBody.innerHTML = "";
+        rows.forEach(r => {
+            let extra = ((r.inrPerGram - bestRate) * (sipAmount / bestRate)).toFixed(2);
+            tableBody.innerHTML += `<tr>
+                <td>${r.date}</td>
+                <td>₹${r.inrPerGram.toFixed(2)}</td>
+                <td>${r.grams.toFixed(3)}</td>
+                <td>${extra}</td>
+            </tr>`;
+        });
+
+        await predictFuture();
+        await checkAccuracy();
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+async function predictFuture() {
+    const today = new Date();
+    let month = today.getMonth();
+    let monthNum = (month + 1).toString().padStart(2, '0');
+    let startYear = today.getFullYear() - 10;
+    let endYear = today.getFullYear() - 1;
+
+    let url = `https://api.metals.dev/v1/timeseries?api_key=${API_KEY}&start_date=${startYear}-${monthNum}-01&end_date=${endYear}-${monthNum}-31&currency=USD&unit=t.oz&metals=gold&currencies=INR`;
+
+    try {
+        let res = await fetch(url);
+        let data = await res.json();
+        if (!data.rates) { console.error("Prediction fetch failed"); return; }
+
+        let dailyPrices = {};
+        for (let date in data.rates) {
+            let day = parseInt(date.split("-")[2]);
+            let price = usdOzToInrGram(data.rates[date].metals.gold, data.rates[date].currencies.INR);
+            if (!dailyPrices[day]) dailyPrices[day] = [];
+            dailyPrices[day].push(price);
+        }
+
+        let avgDaily = {};
+        for (let d in dailyPrices) {
+            avgDaily[d] = dailyPrices[d].reduce((a, b) => a + b, 0) / dailyPrices[d].length;
+        }
+
+        let predTable = document.getElementById("predictionTable");
+        predTable.innerHTML = "";
+        let storedPredictions = JSON.parse(localStorage.getItem("predictions") || "{}");
+
+        for (let i = 1; i <= 5; i++) {
+            let future = new Date();
+            future.setDate(today.getDate() + i);
+            let fd = future.getDate();
+            let dateStr = future.toISOString().split("T")[0];
+            let predPrice = avgDaily[fd] ? avgDaily[fd].toFixed(2) : "N/A";
+
+            if (predPrice !== "N/A") storedPredictions[dateStr] = parseFloat(predPrice);
+
+            predTable.innerHTML += `<tr>
+                <td>${dateStr}</td>
+                <td>₹${predPrice}</td>
+            </tr>`;
+        }
+        localStorage.setItem("predictions", JSON.stringify(storedPredictions));
+    } catch (err) {
+        console.error(err);
+    }
+}
+
+async function checkAccuracy() {
+    let storedPredictions = JSON.parse(localStorage.getItem("predictions") || "{}");
+    let todayStr = new Date().toISOString().split("T")[0];
+    let pastDates = Object.keys(storedPredictions).filter(d => d < todayStr);
+
+    if (pastDates.length === 0) return;
+
+    document.getElementById("accuracySection").style.display = "block";
+    let tableBody = document.getElementById("accuracyTable");
+    tableBody.innerHTML = "";
+
+    for (let d of pastDates) {
+        let url = `https://api.metals.dev/v1/timeseries?api_key=${API_KEY}&start_date=${d}&end_date=${d}&currency=USD&unit=t.oz&metals=gold&currencies=INR`;
+        try {
+            let res = await fetch(url);
+            let data = await res.json();
+            let actual = usdOzToInrGram(data.rates[d].metals.gold, data.rates[d].currencies.INR);
+            let predicted = storedPredictions[d];
+            let error = ((Math.abs(predicted - actual) / actual) * 100).toFixed(2);
+            tableBody.innerHTML += `<tr>
+                <td>${d}</td>
+                <td>₹${predicted.toFixed(2)}</td>
+                <td>₹${actual.toFixed(2)}</td>
+                <td>${error}%</td>
+            </tr>`;
+        } catch (err) {
+            console.error(err);
+        }
+    }
+}
+</script>
+</body>
+</html>
